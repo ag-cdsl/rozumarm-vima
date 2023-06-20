@@ -10,5 +10,8 @@ Dependencies:
 export PYTHONPATH=${PYTHONPATH}:/home/daniil/code/rozumarm-vima/rozumarm_vima/rozumarm_vima_cv:/home/daniil/code/rozumarm-vima/rozumarm_vima/utils:/home/daniil/code/rozumarm-vima/rozumarm_vima/camera_utils
 ```
 
+Download all missing VIMA checkpoints from https://github.com/vimalabs/VIMA 
+
 How to:
-- to start (segmentation -> model -> arm) pipeline, run `scripts/run_model_loop.py`
+- to start (aruco detector -> sim -> oracle -> arm) pipeline, run `scripts/run_aruco2sim_loop.py`
+- to start (aruco detector -> sim -> VIMA model -> arm) pipeline, run `scripts/run_model_loop.py`

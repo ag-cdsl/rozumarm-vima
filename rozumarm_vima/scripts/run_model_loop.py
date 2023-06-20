@@ -3,17 +3,18 @@ import os
 
 import pickle
 
-from rozumarm_vima_utils.cv.camera import Camera, CamDenseReader
-from rozumarm_vima_utils.rozumarm_vima_cv.segment_scene import segment_scene
+from rozumarm_vima_utils.camera import Camera, CamDenseReader
+from rozumarm_vima.rozumarm_vima_cv.segment_scene import segment_scene
 
 import numpy as np
 import cv2
 from time import sleep
 
 from rozumarm_vima_utils.transform import rf_tf_c2r, map_tf_repr_c2r
-from rozumarm_vima_utils.vima.vima_model import VimaModel
+from rozumarm_vima.vima_model import VimaModel
 # from rozumarm_vima_utils.rudolph_model import RuDolphModel
 import argparse
+
 
 def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
     """
@@ -49,8 +50,10 @@ def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
                                             6: {'obj_name': 'small block'},
                                             7: {'obj_name': 'small block'}}
             model.reset(r.env.prompt,r.env.prompt_assets)
-            #action = model.step(obs,meta_info)
-            action = oracle.act(obs)
+            action = model.step(obs,meta_info)
+
+            # action = oracle.act(obs)
+
             if action is None:
                 print("Press Enter to try again, or q + Enter to exit.")
                 ret = input()
@@ -236,7 +239,7 @@ def get_prompt_assets():
 from rozumarm_vima_utils.scene_renderer import VIMASceneRenderer
 def main():
     from rozumarm_vima_utils.robot import RozumArm
-    from rozumarm_vima_utils.scripts.detect_cubes import mock_detect_cubes
+    # from rozumarm_vima_utils.scripts.detect_cubes import mock_detect_cubes
     # from rozumarm_vima_utils.cv.test import CubeDetector
 
     r = VIMASceneRenderer('sweep_without_exceeding')
@@ -248,18 +251,19 @@ def main():
     arg.add_argument("--task", type=str, default="visual_manipulation")
     arg.add_argument("--ckpt", type=str, required=True)
     arg.add_argument("--device", default="cpu")
-    arg = arg.parse_args("--ckpt /home/daniil/code/rozumarm-vima-utils/2M.ckpt --device cuda --task sweep_without_exceeding".split())    
-    #assert False, os.listdir()
+    arg = arg.parse_args("--ckpt ./2M.ckpt --device cuda --task sweep_without_exceeding".split())    
+
     model = VimaModel(arg)
     #model = RuDolphModel()
 
     r.reset(exact_num_swept_objects=1)
+
     # prompt_assets = get_prompt_assets()
     # model.reset(r.env.prompt, prompt_assets)
     model.reset(r.env.prompt, r.env.prompt_assets)
     
-    from rozumarm_vima_utils.cv.test import detector
-    # detector = CubeDetector()
+    from rozumarm_vima.detectors import detector
+
     run_loop(r, robot, oracle, cubes_detector=detector, model=model, n_iters=1)
     # run_loop_sim_to_real(r, prompt_assets, robot, oracle, model=model, n_iters=2)
     detector.release()
