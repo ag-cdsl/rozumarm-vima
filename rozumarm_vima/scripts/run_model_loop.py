@@ -16,6 +16,9 @@ from rozumarm_vima.vima_model import VimaModel
 import argparse
 
 
+N_SWEPT_OBJECTS = 2
+
+
 def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
     """
     r: scene renderer
@@ -23,7 +26,7 @@ def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
     while True:
         for i in range(n_iters):
             n_cubes = -1
-            while n_cubes != 2:
+            while n_cubes != 2 * N_SWEPT_OBJECTS:
                 obj_posquats = cubes_detector.detect()
                 n_cubes = len(obj_posquats)
 
@@ -59,7 +62,7 @@ def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
                 ret = input()
                 if len(ret) > 0 and ret[0] == 'q':
                     return
-                r.reset(exact_num_swept_objects=1)
+                r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
                 continue
                 # print("ORACLE FAILED.")
                 # # cubes_detector.release()
@@ -87,7 +90,7 @@ def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
         ret = input()
         if len(ret) > 0 and ret[0] == 'q':
             return
-        r.reset(exact_num_swept_objects=1)
+        r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
         model.reset(r.env.prompt,r.env.prompt_assets)
         continue
 
@@ -256,7 +259,7 @@ def main():
     model = VimaModel(arg)
     #model = RuDolphModel()
 
-    r.reset(exact_num_swept_objects=1)
+    r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
 
     # prompt_assets = get_prompt_assets()
     # model.reset(r.env.prompt, prompt_assets)
