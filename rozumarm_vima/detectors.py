@@ -1,4 +1,4 @@
-from .camera import Camera, CamDenseReader
+from rozumarm_vima_utils.camera import Camera, CamDenseReader
 import numpy as np
 import cv2
 
@@ -32,8 +32,8 @@ class CubeDetector():
 import time
 class CubeDenseDetector():
     def __init__(self) -> None:
-        self.cam_1 = CamDenseReader(2, 'cam_top_video.mp4')
-        self.cam_2 = CamDenseReader(0, 'cam_front_video.mp4')
+        self.cam_1 = CamDenseReader(0, 'cam_top_video.mp4')
+        self.cam_2 = CamDenseReader(4, 'cam_front_video.mp4')
         self.cam_1.start_recording()
         self.cam_2.start_recording()
 

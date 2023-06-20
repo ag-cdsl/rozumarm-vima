@@ -1,0 +1,6 @@
+*.egg-info
+*.pyc
+*.mp4
+*.jpg
+
+pg.ipynb
