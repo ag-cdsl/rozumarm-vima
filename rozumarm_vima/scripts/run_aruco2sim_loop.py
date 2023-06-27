@@ -5,11 +5,11 @@ import numpy as np
 from rozumarm_vima_utils.transform import rf_tf_c2r, map_tf_repr_c2r
 
 
-def run_loop(r, robot, oracle, cubes_detector: Callable, n_iters=3):
+def run_loop(r, robot, oracle, cubes_detector: Callable):
     """
     r: scene renderer
     """
-    for _ in range(n_iters):
+    while True:
         obj_posquats = cubes_detector.detect()
 
         # map from cam to rozum
@@ -47,6 +47,13 @@ def run_loop(r, robot, oracle, cubes_detector: Callable, n_iters=3):
         posquat_0 = (pos_0, eef_quat)
         posquat_1 = (pos_1, eef_quat)
         robot.swipe(posquat_0, posquat_1)
+        
+        cmd = input("Press return for one more swipe, enter [s] to save videos, enter [q] to exit.\n")
+        if cmd == "s":
+            cubes_detector.release()
+        if cmd == "s" or cmd == "q":
+            print("Quitting...")
+            break
 
 
 class MockObjDetector:
@@ -72,7 +79,7 @@ def main():
 
     from rozumarm_vima.detectors import detector
     
-    run_loop(r, robot, oracle, cubes_detector=detector, n_iters=5)
+    run_loop(r, robot, oracle, cubes_detector=detector)
 
 
 if __name__ == '__main__':

@@ -16,7 +16,7 @@ from rozumarm_vima.vima_model import VimaModel
 import argparse
 
 
-N_SWEPT_OBJECTS = 2
+N_SWEPT_OBJECTS = 1
 
 
 def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
