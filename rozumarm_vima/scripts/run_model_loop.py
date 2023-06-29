@@ -16,7 +16,7 @@ from rozumarm_vima.vima_model import VimaModel
 import argparse
 
 
-N_SWEPT_OBJECTS = 1
+N_SWEPT_OBJECTS = 2
 
 
 def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
@@ -52,9 +52,8 @@ def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
                                             5: {'obj_name': 'line'},
                                             6: {'obj_name': 'small block'},
                                             7: {'obj_name': 'small block'}}
-            model.reset(r.env.prompt,r.env.prompt_assets)
-            action = model.step(obs,meta_info)
-
+            
+            action = model.step(obs, meta_info)
             # action = oracle.act(obs)
 
             if action is None:
@@ -86,12 +85,13 @@ def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
             posquat_1 = (pos_1, eef_quat)
             robot.swipe(posquat_0, posquat_1)
 
-        print("Press Enter to try again, or q + Enter to exit.")
+        print("Press Enter to try again, n to New Episode; or q + Enter to exit.")
         ret = input()
         if len(ret) > 0 and ret[0] == 'q':
             return
-        r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
-        model.reset(r.env.prompt,r.env.prompt_assets)
+        if len(ret) > 0 and ret[0] == 'n':
+            r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
+            model.reset(r.env.prompt,r.env.prompt_assets)
         continue
 
 
