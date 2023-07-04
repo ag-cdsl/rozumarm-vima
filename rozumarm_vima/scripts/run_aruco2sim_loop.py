@@ -5,6 +5,9 @@ import numpy as np
 from rozumarm_vima_utils.transform import rf_tf_c2r, map_tf_repr_c2r
 
 
+N_SWEPT_OBJECTS = 2
+
+
 def run_loop(r, robot, oracle, cubes_detector: Callable):
     """
     r: scene renderer
@@ -18,13 +21,7 @@ def run_loop(r, robot, oracle, cubes_detector: Callable):
         ]
 
         front_img, top_img = r.render_scene(obj_posquats)
-        obs = {
-            'rgb': {
-                'front': np.transpose(front_img, axes=(2, 0, 1)),
-                'top': np.transpose(top_img, axes=(2, 0, 1))
-            },
-            'ee': 1  # spatula
-        }
+        obs, *_ = r.env.step(action=None)
 
         action = oracle.act(obs)
         if action is None:
@@ -73,7 +70,7 @@ def main():
     oracle = r.env.task.oracle(r.env)
     robot = RozumArm(use_mock_api=False)
     
-    r.reset(exact_num_swept_objects=1)
+    r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
     
     # detector = MockObjDetector()
 

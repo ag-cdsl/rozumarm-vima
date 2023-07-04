@@ -12,7 +12,7 @@ from time import sleep
 
 from rozumarm_vima_utils.transform import rf_tf_c2r, map_tf_repr_c2r
 from rozumarm_vima.vima_model import VimaModel
-# from rozumarm_vima_utils.rudolph_model import RuDolphModel
+# from rozumarm_vima.rudolph_model import RuDolphModel
 import argparse
 
 
@@ -36,14 +36,7 @@ def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
             ]
 
             front_img, top_img = r.render_scene(obj_posquats)
-            obs = {
-                'rgb': {
-                    'front': np.transpose(front_img, axes=(2, 0, 1)),
-                    'top': np.transpose(top_img, axes=(2, 0, 1))
-                },
-                'segm': r.env._get_obs()['segm'],
-                'ee': 1  # spatula
-            }
+            obs, *_ = r.env.step(action=None)
 
             meta_info = {'action_bounds':{'low': np.array([ 0.25, -0.5 ]), 'high': np.array([0.75, 0.5 ])}}
             
@@ -67,6 +60,8 @@ def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
                 # # cubes_detector.release()
                 # return
 
+            # print(action) #.detach().cpu().numpy()[0][0]
+
             clipped_action = {
                 k: np.clip(v, r.env.action_space[k].low, r.env.action_space[k].high)
                 for k, v in action.items()
@@ -84,6 +79,7 @@ def run_loop(r, robot, oracle, cubes_detector, model=None, n_iters=3):
             posquat_0 = (pos_0, eef_quat)
             posquat_1 = (pos_1, eef_quat)
             robot.swipe(posquat_0, posquat_1)
+            # r.env.step(action)
 
         print("Press Enter to try again, n to New Episode; or q + Enter to exit.")
         ret = input()
