@@ -161,7 +161,53 @@ class RuDolphModel:
         actions = {'pose0_position': torch.tensor([[[actionss[0], actionss[1]]]], device='cuda:0'), 
                 'pose0_rotation': torch.tensor([[[actionss[2], actionss[3], actionss[4], actionss[5]]]], device='cuda:0'), 
                 'pose1_position': torch.tensor([[[actionss[6], actionss[7]]]], device='cuda:0'), 
-                'pose1_rotation': torch.tensor([[[actionss[8], actionss[8], actionss[10], actionss[11]]]], device='cuda:0')}    
+                'pose1_rotation': torch.tensor([[[actionss[8], actionss[8], actionss[10], actionss[11]]]], device='cuda:0')}  
+
+        print(actions)
+        #action_tokens = policy.forward_action_token(actions)  # (1, B, E)
+        #action_tokens = action_tokens.squeeze(0)  # (B, E)
+        #inference_cache["action_tokens"].append(action_tokens[0])
+        actions = de_discretize_actions(actions)
+        action_bounds = [meta_info["action_bounds"]]
+        action_bounds_low = [action_bound["low"] for action_bound in action_bounds]
+        action_bounds_high = [
+            action_bound["high"] for action_bound in action_bounds
+        ]
+        action_bounds_low = np.asarray(action_bounds_low)
+        action_bounds_high = np.asarray(action_bounds_high)
+        action_bounds_low = torch.tensor(
+            action_bounds_low, dtype=torch.float32, device=cfg.device
+        )
+        action_bounds_high = torch.tensor(
+            action_bounds_high, dtype=torch.float32, device=cfg.device
+        )
+        actions["pose0_position"] = (
+            actions["pose0_position"] * (action_bounds_high - action_bounds_low)
+            + action_bounds_low
+        )
+        actions["pose1_position"] = (
+            actions["pose1_position"] * (action_bounds_high - action_bounds_low)
+            + action_bounds_low
+        )
+        actions["pose0_position"] = torch.clamp(
+            actions["pose0_position"], min=action_bounds_low, max=action_bounds_high
+        )
+        actions["pose1_position"] = torch.clamp(
+            actions["pose1_position"], min=action_bounds_low, max=action_bounds_high
+        )
+        actions["pose0_rotation"] = actions["pose0_rotation"] * 2 - 1
+        actions["pose1_rotation"] = actions["pose1_rotation"] * 2 - 1
+        actions["pose0_rotation"] = torch.clamp(
+            actions["pose0_rotation"], min=-1, max=1
+        )
+        actions["pose1_rotation"] = torch.clamp(
+            actions["pose1_rotation"], min=-1, max=1
+
+        )
+        actions = {k: v.cpu().numpy() for k, v in actions.items()}
+        actions = any_slice(actions, np.s_[0, 0])
+
+        
         return actions
 
 
