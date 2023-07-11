@@ -170,27 +170,29 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
 
         print("Press Enter to try again, n to New Episode; or q + Enter to exit.")
         ret = input()
+        if ret == "s":
+            assert WRITE_TRAJS_TO_DATASET, "Cannot write trajectory."
+            if USE_OBS_FROM_SIM:
+                obs, top_cam_image, front_cam_image = prepare_sim_obs(cubes_detector, r)
+                obs["top_cam_image"] = top_cam_image
+                obs["front_cam_image"] = front_cam_image
+            else:
+                obs = prepare_real_obs(cam_1, cam_2)
+            traj.append(obs)
+
+            file_id = datetime.datetime.now().isoformat()
+            filepath = f"{DATASET_DIR}/{file_id}.traj"
+            with open(filepath, 'wb') as f:
+                pickle.dump(traj, f)
+            print(f"Saved trajectory {file_id}.")
+            traj.clear()
+
+            ret = input("Enter command: ")
         if len(ret) > 0 and ret[0] == 'q':
             if USE_OBS_FROM_SIM:
                 detector.release()
             return
         if len(ret) > 0 and ret[0] == 'n':
-            if WRITE_TRAJS_TO_DATASET:
-                if USE_OBS_FROM_SIM:
-                    obs, top_cam_image, front_cam_image = prepare_sim_obs(cubes_detector, r)
-                    obs["top_cam_image"] = top_cam_image
-                    obs["front_cam_image"] = front_cam_image
-                else:
-                    obs = prepare_real_obs(cam_1, cam_2)
-                traj.append(obs)
-
-                file_id = datetime.datetime.now().isoformat()
-                filepath = f"{DATASET_DIR}/{file_id}.traj"
-                with open(filepath, 'wb') as f:
-                    pickle.dump(traj, f)
-                print(f"Saved trajectory {file_id}.")
-                traj.clear()
-
             r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
 
             if not USE_ORACLE:
