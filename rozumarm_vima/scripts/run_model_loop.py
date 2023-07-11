@@ -1,7 +1,9 @@
 from typing import Callable
 import os
+import os.path as osp
 
 import pickle
+import datetime
 
 from rozumarm_vima_utils.scene_renderer import VIMASceneRenderer
 from rozumarm_vima_utils.robot import RozumArm
@@ -19,15 +21,68 @@ import argparse
 USE_OBS_FROM_SIM = True
 USE_ORACLE = True
 
-N_SWEPT_OBJECTS = 2
+N_SWEPT_OBJECTS = 1
 USE_REAL_ROBOT = True
 # USE_FIXED_PROMPT_FOR_SIM = False
+
+WRITE_TRAJS_TO_DATASET = True
+DATASET_DIR = "rozumarm-dataset"
+
+
+def prepare_sim_obs(detector, env_renderer):
+    n_cubes = -1
+    while n_cubes != 2 * N_SWEPT_OBJECTS:
+        obj_posquats = detector.detect()
+        n_cubes = len(obj_posquats)
+
+    # map from cam to rozum
+    obj_posquats = [
+        (rf_tf_c2r(pos), map_tf_repr_c2r(quat)) for pos, quat in obj_posquats
+    ]
+
+    env_renderer.render_scene(obj_posquats)
+    obs, *_ = env_renderer.env.step(action=None)
+
+    _, top_cam_image = detector.cam_1.read_image()
+    _, front_cam_image = detector.cam_2.read_image()
+    return obs, top_cam_image, front_cam_image
+
+
+def prepare_real_obs(top_cam, front_cam):
+    _, image_top = top_cam.read_image()
+    _, image_front = front_cam.read_image()
+
+    segm_top, _ = segment_scene(image_top, "top")
+    segm_front, _ = segment_scene(image_front, "front")
+
+    img_top = cv2.resize(image_top, (256, 128))
+    img_front = cv2.resize(image_front, (256, 128))
+
+    img_top = cv2.rotate(img_top, cv2.ROTATE_180)
+    segm_top = cv2.rotate(segm_top, cv2.ROTATE_180)
+
+    obs = {
+        'rgb': {
+            'front': np.transpose(img_front, axes=(2, 0, 1)),
+            'top': np.transpose(img_top, axes=(2, 0, 1))
+        },
+        'segm':{
+            'front': segm_front,
+            'top': segm_top
+        },
+        'ee': 1  # spatula
+    }
+    return obs
 
 
 def run_loop(r, robot, oracle, model=None, n_iters=1):
     """
     r: scene renderer
     """
+    if WRITE_TRAJS_TO_DATASET:
+        os.makedirs(DATASET_DIR, exist_ok=True)
+        traj = []
+
     if USE_OBS_FROM_SIM:
         from rozumarm_vima.detectors import detector
         cubes_detector = detector
@@ -49,45 +104,15 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
     while True:
         for i in range(n_iters):
             if USE_OBS_FROM_SIM:
-                n_cubes = -1
-                while n_cubes != 2 * N_SWEPT_OBJECTS:
-                    obj_posquats = cubes_detector.detect()
-                    n_cubes = len(obj_posquats)
-
-                # map from cam to rozum
-                obj_posquats = [
-                    (rf_tf_c2r(pos), map_tf_repr_c2r(quat)) for pos, quat in obj_posquats
-                ]
-
-                front_img, top_img = r.render_scene(obj_posquats)
-                obs, *_ = r.env.step(action=None)
+                obs, top_cam_image, front_cam_image = prepare_sim_obs(cubes_detector, r)
             else:
-                _, image_top = cam_1.read_image()
-                _, image_front = cam_2.read_image()
-
-                segm_top, _ = segment_scene(image_top, "top")
-                segm_front, _ = segment_scene(image_front, "front")
-
-                img_top = cv2.resize(image_top, (256, 128))
-                img_front = cv2.resize(image_front, (256, 128))
-
-                img_top = cv2.rotate(img_top, cv2.ROTATE_180)
-                segm_top = cv2.rotate(segm_top, cv2.ROTATE_180)
-
-                obs = {
-                    'rgb': {
-                        'front': np.transpose(img_front, axes=(2, 0, 1)),
-                        'top': np.transpose(img_top, axes=(2, 0, 1))
-                    },
-                    'segm':{
-                        'front': segm_front,
-                        'top': segm_top
-                    },
-                    'ee': 1  # spatula
-                }
+                obs = prepare_real_obs(cam_1, cam_2)
 
             if USE_ORACLE:
                 action = oracle.act(obs)
+                # print(f'Prompt is {r.env.prompt}')
+                # print(f'action is {action}')
+                # print('---------------------------')
             else:
                 meta_info = {'action_bounds':{'low': np.array([ 0.25, -0.5 ]), 'high': np.array([0.75, 0.5 ])}}
                 meta_info["n_objects"] = 4
@@ -133,7 +158,15 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
             posquat_0 = (pos_0, eef_quat)
             posquat_1 = (pos_1, eef_quat)
             robot.swipe(posquat_0, posquat_1)
-            # r.env.step(action)
+            r.env.step(action)
+
+            if WRITE_TRAJS_TO_DATASET:
+                if USE_OBS_FROM_SIM:
+                    obs["top_cam_image"] = top_cam_image
+                    obs["front_cam_image"] = front_cam_image
+                obs["after_sim_swipe"] = r.env._get_obs()
+                traj.append(obs)
+                traj.append(clipped_action)
 
         print("Press Enter to try again, n to New Episode; or q + Enter to exit.")
         ret = input()
@@ -142,6 +175,22 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                 detector.release()
             return
         if len(ret) > 0 and ret[0] == 'n':
+            if WRITE_TRAJS_TO_DATASET:
+                if USE_OBS_FROM_SIM:
+                    obs, top_cam_image, front_cam_image = prepare_sim_obs(cubes_detector, r)
+                    obs["top_cam_image"] = top_cam_image
+                    obs["front_cam_image"] = front_cam_image
+                else:
+                    obs = prepare_real_obs(cam_1, cam_2)
+                traj.append(obs)
+
+                file_id = datetime.datetime.now().isoformat()
+                filepath = f"{DATASET_DIR}/{file_id}.traj"
+                with open(filepath, 'wb') as f:
+                    pickle.dump(traj, f)
+                print(f"Saved trajectory {file_id}.")
+                traj.clear()
+
             r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
 
             if not USE_ORACLE:
