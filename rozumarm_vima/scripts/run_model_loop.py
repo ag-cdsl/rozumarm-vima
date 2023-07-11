@@ -18,14 +18,14 @@ from rozumarm_vima_utils.transform import rf_tf_c2r, map_tf_repr_c2r
 import argparse
 
 
-USE_OBS_FROM_SIM = True
-USE_ORACLE = True
+USE_OBS_FROM_SIM = False
+USE_ORACLE = False
 
-N_SWEPT_OBJECTS = 1
+N_SWEPT_OBJECTS = 2
 USE_REAL_ROBOT = True
 # USE_FIXED_PROMPT_FOR_SIM = False
 
-WRITE_TRAJS_TO_DATASET = True
+WRITE_TRAJS_TO_DATASET = False
 DATASET_DIR = "rozumarm-dataset"
 
 
@@ -97,8 +97,8 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
         prompt_assets = get_prompt_assets()
 
     if not USE_ORACLE:
-        prompt = r.env.prompt
-        # prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
+        # prompt = r.env.prompt
+        prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
         model.reset(prompt, prompt_assets)
 
     while True:
@@ -195,11 +195,14 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
         if len(ret) > 0 and ret[0] == 'n':
             r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
 
+            if WRITE_TRAJS_TO_DATASET:
+                traj.clear()
+
             if not USE_ORACLE:
                 if USE_OBS_FROM_SIM:
                     prompt_assets = r.env.prompt_assets
-                prompt = r.env.prompt
-                # prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
+                # prompt = r.env.prompt
+                prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
                 model.reset(prompt, prompt_assets)
         continue
     
@@ -303,7 +306,7 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
 
 
 def get_prompt_assets():
-    folder = "/home/daniil/code/rozumarm-vima-utils/rozumarm_vima_utils/rozumarm_vima_cv/images/prompts/"
+    folder = "/home/daniil/code/rozumarm-vima/rozumarm_vima/rozumarm_vima_cv/images/prompts/"
 
     bounds = dict()
     bounds['rgb'] = dict()
@@ -373,8 +376,8 @@ def main():
         oracle = None
         from rozumarm_vima.vima_model import VimaModel
         from rozumarm_vima.rudolph_model import RuDolphModel
-        model = VimaModel(arg)
-        # model = RuDolphModel()
+        # model = VimaModel(arg)
+        model = RuDolphModel()
 
     run_loop(r, robot, oracle, model=model, n_iters=1)
 
