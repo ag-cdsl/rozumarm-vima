@@ -3,6 +3,8 @@ import os
 
 import pickle
 
+from rozumarm_vima_utils.scene_renderer import VIMASceneRenderer
+from rozumarm_vima_utils.robot import RozumArm
 from rozumarm_vima_utils.camera import Camera, CamDenseReader
 from rozumarm_vima.rozumarm_vima_cv.segment_scene import segment_scene
 
@@ -11,12 +13,12 @@ import cv2
 from time import sleep
 
 from rozumarm_vima_utils.transform import rf_tf_c2r, map_tf_repr_c2r
-from rozumarm_vima.vima_model import VimaModel
-# from rozumarm_vima.rudolph_model import RuDolphModel
 import argparse
 
 
 USE_OBS_FROM_SIM = True
+USE_ORACLE = True
+
 N_SWEPT_OBJECTS = 2
 USE_REAL_ROBOT = True
 # USE_FIXED_PROMPT_FOR_SIM = False
@@ -28,9 +30,9 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
     """
     if USE_OBS_FROM_SIM:
         from rozumarm_vima.detectors import detector
-
         cubes_detector = detector
-        model.reset(r.env.prompt, r.env.prompt_assets)
+
+        prompt_assets = r.env.prompt_assets
     else:
         cam_1 = CamDenseReader(0, 'cam_top_video.mp4')
         cam_2 = CamDenseReader(2, 'cam_front_video.mp4')
@@ -38,9 +40,10 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
         cam_2.start_recording()
 
         prompt_assets = get_prompt_assets()
+
+    if not USE_ORACLE:
         prompt = r.env.prompt
         # prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
-        # print(prompt)
         model.reset(prompt, prompt_assets)
 
     while True:
@@ -83,22 +86,22 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                     'ee': 1  # spatula
                 }
 
-            meta_info = {'action_bounds':{'low': np.array([ 0.25, -0.5 ]), 'high': np.array([0.75, 0.5 ])}}
-            
-            meta_info["n_objects"] = 4
-            meta_info["obj_id_to_info"] = {4: {'obj_name': 'three-sided rectangle'},
-                                            5: {'obj_name': 'line'},
-                                            6: {'obj_name': 'small block'},
-                                            7: {'obj_name': 'small block'}}
-            
-            action = model.step(obs, meta_info)
-            # with open(r'student_{}.dat'.format(model.elapsed_steps),'w+b') as file: 
-            #     obs['action'] = action
-            #     obs['prompt'] = r.env.prompt
-            #     obs['assets'] = r.env.prompt_assets
-            #     obs['inf_cache'] = model.inference_cache
-            #     pickle.dump(obs,file)
-            # action = oracle.act(obs)
+            if USE_ORACLE:
+                action = oracle.act(obs)
+            else:
+                meta_info = {'action_bounds':{'low': np.array([ 0.25, -0.5 ]), 'high': np.array([0.75, 0.5 ])}}
+                meta_info["n_objects"] = 4
+                meta_info["obj_id_to_info"] = {4: {'obj_name': 'three-sided rectangle'},
+                                                5: {'obj_name': 'line'},
+                                                6: {'obj_name': 'small block'},
+                                                7: {'obj_name': 'small block'}}
+                action = model.step(obs, meta_info)
+                # with open(r'student__{}.dat'.format(model.elapsed_steps),'w+b') as file: 
+                #      obs['action'] = action
+                #      obs['prompt'] = prompt
+                #      obs['assets'] = r.env.prompt_assets
+                #      #obs['inf_cache'] = model.inference_cache
+                #      pickle.dump(obs,file)
 
             if action is None:
                 print("Press Enter to try again, or q + Enter to exit.")
@@ -135,13 +138,18 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
         print("Press Enter to try again, n to New Episode; or q + Enter to exit.")
         ret = input()
         if len(ret) > 0 and ret[0] == 'q':
+            if USE_OBS_FROM_SIM:
+                detector.release()
             return
         if len(ret) > 0 and ret[0] == 'n':
             r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
-            prompt = r.env.prompt
-            # prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
-            # print(prompt)
-            model.reset(prompt, r.env.prompt_assets)
+
+            if not USE_ORACLE:
+                if USE_OBS_FROM_SIM:
+                    prompt_assets = r.env.prompt_assets
+                prompt = r.env.prompt
+                # prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
+                model.reset(prompt, prompt_assets)
         continue
     
     if USE_OBS_FROM_SIM:
@@ -294,14 +302,10 @@ def get_prompt_assets():
     return prompt_assets
 
 
-from rozumarm_vima_utils.scene_renderer import VIMASceneRenderer
 def main():
-    from rozumarm_vima_utils.robot import RozumArm
-    # from rozumarm_vima_utils.scripts.detect_cubes import mock_detect_cubes
-    # from rozumarm_vima_utils.cv.test import CubeDetector
-
     r = VIMASceneRenderer('sweep_without_exceeding')
-    oracle = r.env.task.oracle(r.env)
+    r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
+
     robot = RozumArm(use_mock_api=not USE_REAL_ROBOT)
 
     arg = argparse.ArgumentParser()
@@ -310,11 +314,16 @@ def main():
     arg.add_argument("--ckpt", type=str, required=True)
     arg.add_argument("--device", default="cpu")
     arg = arg.parse_args("--ckpt ./20M.ckpt --device cuda --task sweep_without_exceeding".split())    
-
-    model = VimaModel(arg)
-    # model = RuDolphModel()
-
-    r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
+    
+    if USE_ORACLE:
+        oracle = r.env.task.oracle(r.env)
+        model = None
+    else:
+        oracle = None
+        from rozumarm_vima.vima_model import VimaModel
+        from rozumarm_vima.rudolph_model import RuDolphModel
+        model = VimaModel(arg)
+        # model = RuDolphModel()
 
     run_loop(r, robot, oracle, model=model, n_iters=1)
 
