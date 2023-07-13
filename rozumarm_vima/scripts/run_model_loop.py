@@ -18,14 +18,14 @@ from rozumarm_vima_utils.transform import rf_tf_c2r, map_tf_repr_c2r
 import argparse
 
 
-USE_OBS_FROM_SIM = False
-USE_ORACLE = False
+USE_OBS_FROM_SIM = True
+USE_ORACLE = True
 
-N_SWEPT_OBJECTS = 2
+N_SWEPT_OBJECTS = 1
 USE_REAL_ROBOT = True
 # USE_FIXED_PROMPT_FOR_SIM = False
 
-WRITE_TRAJS_TO_DATASET = False
+WRITE_TRAJS_TO_DATASET = True
 DATASET_DIR = "rozumarm-dataset"
 
 
@@ -79,10 +79,6 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
     """
     r: scene renderer
     """
-    if WRITE_TRAJS_TO_DATASET:
-        os.makedirs(DATASET_DIR, exist_ok=True)
-        traj = []
-
     if USE_OBS_FROM_SIM:
         from rozumarm_vima.detectors import detector
         cubes_detector = detector
@@ -97,9 +93,14 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
         prompt_assets = get_prompt_assets()
 
     if not USE_ORACLE:
-        # prompt = r.env.prompt
         prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
         model.reset(prompt, prompt_assets)
+    else:
+        prompt = r.env.prompt
+
+    if WRITE_TRAJS_TO_DATASET:
+        os.makedirs(DATASET_DIR, exist_ok=True)
+        traj = [prompt, prompt_assets]
 
     while True:
         for i in range(n_iters):
@@ -158,13 +159,17 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
             posquat_0 = (pos_0, eef_quat)
             posquat_1 = (pos_1, eef_quat)
             robot.swipe(posquat_0, posquat_1)
-            r.env.step(action)
+            sim_obs, sim_reward, sim_done, sim_info = r.env.step(action)
 
             if WRITE_TRAJS_TO_DATASET:
                 if USE_OBS_FROM_SIM:
                     obs["top_cam_image"] = top_cam_image
                     obs["front_cam_image"] = front_cam_image
-                obs["after_sim_swipe"] = r.env._get_obs()
+                else:
+                    obs["sim_obs"] = r.env._get_obs()
+                obs["after_sim_swipe"] = sim_obs
+                obs["sim_done"] = sim_done
+                obs["sim_success"] = sim_info["success"]
                 traj.append(obs)
                 traj.append(clipped_action)
 
@@ -178,6 +183,7 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                 obs["front_cam_image"] = front_cam_image
             else:
                 obs = prepare_real_obs(cam_1, cam_2)
+                obs["sim_obs"] = r.env._get_obs()
             traj.append(obs)
 
             file_id = datetime.datetime.now().isoformat()
@@ -185,7 +191,6 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
             with open(filepath, 'wb') as f:
                 pickle.dump(traj, f)
             print(f"Saved trajectory {file_id}.")
-            traj.clear()
 
             ret = input("Enter command: ")
         if len(ret) > 0 and ret[0] == 'q':
@@ -195,15 +200,18 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
         if len(ret) > 0 and ret[0] == 'n':
             r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
 
-            if WRITE_TRAJS_TO_DATASET:
-                traj.clear()
-
             if not USE_ORACLE:
                 if USE_OBS_FROM_SIM:
                     prompt_assets = r.env.prompt_assets
                 # prompt = r.env.prompt
                 prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
                 model.reset(prompt, prompt_assets)
+            else:
+                prompt = r.env.prompt
+            
+            if WRITE_TRAJS_TO_DATASET:
+                traj = [prompt, prompt_assets]
+            
         continue
     
     if USE_OBS_FROM_SIM:
