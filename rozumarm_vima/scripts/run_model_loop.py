@@ -21,7 +21,7 @@ import argparse
 
 
 USE_OBS_FROM_SIM = True
-USE_ORACLE = True
+USE_ORACLE = False
 
 N_SWEPT_OBJECTS = 2
 USE_REAL_ROBOT = True
@@ -53,10 +53,15 @@ class ObsFrames(NamedTuple):
 
 def prepare_sim_obs(detector, env_renderer):
     n_cubes = -1
+
+    is_first = True
     while n_cubes != 2 * N_SWEPT_OBJECTS:
         obj_posquats = detector.detect()
         n_cubes = len(obj_posquats)
-        time.sleep(2.0)
+
+        if not is_first:
+            time.sleep(2.0)
+        is_first = False
 
     # map from cam to rozum
     obj_posquats = [
@@ -178,15 +183,18 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                 next_obs = prepare_real_obs(cam_1, cam_2)
                 # next_sim_obs is already defined
             
+            def process_img(img):
+                return img.transpose(2, 0, 1)[:, ::-1, ::-1]
+            
             if WRITE_TRAJS_TO_DATASET:
                 if USE_OBS_FROM_SIM:
                     real_before_action = ObsFrames(
-                        top_cam_image,
-                        front_cam_image
+                        process_img(top_cam_image),
+                        process_img(front_cam_image)
                     )
                     real_after_action = ObsFrames(
-                        next_top_cam_image,
-                        next_front_cam_image
+                        process_img(next_top_cam_image),
+                        process_img(next_front_cam_image)
                     )
                     sim_before_action = ObsFrames(
                         obs["rgb"]["top"],
@@ -202,12 +210,12 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                     )
                 else:
                     real_before_action = ObsFrames(
-                        obs["rgb"]["top"],
-                        obs["rgb"]["front"]
+                        process_img(obs["rgb"]["top"]),
+                        process_img(obs["rgb"]["front"])
                     )
                     real_after_action = ObsFrames(
-                        next_obs["rgb"]["top"],
-                        next_obs["rgb"]["front"]
+                        process_img(next_obs["rgb"]["top"]),
+                        process_img(next_obs["rgb"]["front"])
                     )
                     sim_before_action = ObsFrames(
                         sim_obs["rgb"]["top"],
@@ -225,7 +233,8 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                 step_data = {
                     "text_prompt": prompt,
                     "prompt_assets": prompt_assets,
-                    "model_action": clipped_action,
+                    "model_action": action,
+                    "clipped_action": clipped_action,
                     "done": sim_done,
                     "success": sim_info["success"],
                     "sim_before_action": sim_before_action.export(),
