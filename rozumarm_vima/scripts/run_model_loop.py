@@ -1,6 +1,8 @@
-from typing import Callable
+from typing import Callable, NamedTuple
 import os
 import os.path as osp
+
+import time
 
 import pickle
 import datetime
@@ -19,9 +21,9 @@ import argparse
 
 
 USE_OBS_FROM_SIM = True
-USE_ORACLE = False
+USE_ORACLE = True
 
-N_SWEPT_OBJECTS = 1
+N_SWEPT_OBJECTS = 2
 USE_REAL_ROBOT = True
 # USE_FIXED_PROMPT_FOR_SIM = False
 
@@ -29,11 +31,32 @@ WRITE_TRAJS_TO_DATASET = True
 DATASET_DIR = "rozumarm-dataset"
 
 
+class ObsFrames(NamedTuple):
+    top: np.ndarray
+    front: np.ndarray
+    sgm_top: np.ndarray = None
+    sgm_front: np.ndarray = None
+
+    def export(self):
+        d = {
+            "rgb": {
+                "top": self.top,
+                "front": self.front
+            },
+            "semantic": {
+                "top": self.sgm_top,
+                "front": self.sgm_front
+            }
+        }
+        return d
+
+
 def prepare_sim_obs(detector, env_renderer):
     n_cubes = -1
     while n_cubes != 2 * N_SWEPT_OBJECTS:
         obj_posquats = detector.detect()
         n_cubes = len(obj_posquats)
+        time.sleep(2.0)
 
     # map from cam to rozum
     obj_posquats = [
@@ -82,38 +105,45 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
     if USE_OBS_FROM_SIM:
         from rozumarm_vima.detectors import detector
         cubes_detector = detector
-
-        prompt_assets = r.env.prompt_assets
     else:
         cam_1 = CamDenseReader(0, 'cam_top_video.mp4')
         cam_2 = CamDenseReader(2, 'cam_front_video.mp4')
         cam_1.start_recording()
         cam_2.start_recording()
 
-        prompt_assets = get_prompt_assets()
-
-    if not USE_ORACLE:
-        prompt = 'Sweep all {swept_obj} into {bounds} without exceeding {constraint}'
-        model.reset(prompt, prompt_assets)
-    else:
-        prompt = r.env.prompt
-
     if WRITE_TRAJS_TO_DATASET:
         os.makedirs(DATASET_DIR, exist_ok=True)
-        traj = [prompt, prompt_assets]
 
     while True:
-        for i in range(n_iters):
-            if USE_OBS_FROM_SIM:
-                obs, top_cam_image, front_cam_image = prepare_sim_obs(cubes_detector, r)
-            else:
-                obs = prepare_real_obs(cam_1, cam_2)
+        # reset
+        r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
+        
+        if USE_ORACLE:
+            prompt = r.env.prompt
+            prompt_assets = None
+        else:
+            # prompt = r.env.prompt
+            prompt = 'Sweep all {swept_obj} into {bounds} without exceeding {constraint}'
 
+            if USE_OBS_FROM_SIM:
+                prompt_assets = r.env.prompt_assets
+            else:
+                prompt_assets = get_prompt_assets()
+            model.reset(prompt, prompt_assets)
+        
+        if USE_OBS_FROM_SIM:
+            obs, top_cam_image, front_cam_image = prepare_sim_obs(cubes_detector, r)
+        else:
+            obs = prepare_real_obs(cam_1, cam_2)
+            sim_obs = r.env._get_obs()
+
+        if WRITE_TRAJS_TO_DATASET:
+            traj = {}
+
+        # --- episode ---
+        for step_idx in range(999):
             if USE_ORACLE:
                 action = oracle.act(obs)
-                # print(f'Prompt is {r.env.prompt}')
-                # print(f'action is {action}')
-                # print('---------------------------')
             else:
                 meta_info = {'action_bounds':{'low': np.array([ 0.25, -0.5 ]), 'high': np.array([0.75, 0.5 ])}}
                 meta_info["n_objects"] = 4
@@ -122,26 +152,11 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                                                 6: {'obj_name': 'small block'},
                                                 7: {'obj_name': 'small block'}}
                 action = model.step(obs, meta_info)
-                # with open(r'student__{}.dat'.format(model.elapsed_steps),'w+b') as file: 
-                #      obs['action'] = action
-                #      obs['prompt'] = prompt
-                #      obs['assets'] = r.env.prompt_assets
-                #      #obs['inf_cache'] = model.inference_cache
-                #      pickle.dump(obs,file)
 
             if action is None:
-                print("Press Enter to try again, or q + Enter to exit.")
-                ret = input()
-                if len(ret) > 0 and ret[0] == 'q':
-                    return
-                r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
-                continue
-                # print("ORACLE FAILED.")
-                # # cubes_detector.release()
-                # return
-
-            # print(action) #.detach().cpu().numpy()[0][0]
-
+                print(f"action is None, exiting...")
+                return
+            
             clipped_action = {
                 k: np.clip(v, r.env.action_space[k].low, r.env.action_space[k].high)
                 for k, v in action.items()
@@ -150,72 +165,98 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
             pos_0 = clipped_action["pose0_position"]
             pos_1 = clipped_action["pose1_position"]
             eef_quat = robot.get_swipe_quat(pos_0, pos_1)
-            
-            # x_compensation_bias = 0.03
-            x_compensation_bias = 0.0
-            pos_0[0] += x_compensation_bias
-            pos_1[0] += x_compensation_bias
-            
             posquat_0 = (pos_0, eef_quat)
             posquat_1 = (pos_1, eef_quat)
+
+            # step
             robot.swipe(posquat_0, posquat_1)
-            sim_obs, sim_reward, sim_done, sim_info = r.env.step(action)
+            next_sim_obs, sim_reward, sim_done, sim_info = r.env.step(action)
 
+            if USE_OBS_FROM_SIM:
+                next_obs, next_top_cam_image, next_front_cam_image = prepare_sim_obs(cubes_detector, r)
+            else:
+                next_obs = prepare_real_obs(cam_1, cam_2)
+                # next_sim_obs is already defined
+            
             if WRITE_TRAJS_TO_DATASET:
                 if USE_OBS_FROM_SIM:
-                    obs["top_cam_image"] = top_cam_image
-                    obs["front_cam_image"] = front_cam_image
+                    real_before_action = ObsFrames(
+                        top_cam_image,
+                        front_cam_image
+                    )
+                    real_after_action = ObsFrames(
+                        next_top_cam_image,
+                        next_front_cam_image
+                    )
+                    sim_before_action = ObsFrames(
+                        obs["rgb"]["top"],
+                        obs["rgb"]["front"],
+                        obs["segm"]["top"],
+                        obs["segm"]["front"],
+                    )
+                    sim_after_action = ObsFrames(
+                        next_sim_obs["rgb"]["top"],
+                        next_sim_obs["rgb"]["front"],
+                        next_sim_obs["segm"]["top"],
+                        next_sim_obs["segm"]["front"]
+                    )
                 else:
-                    obs["sim_obs"] = r.env._get_obs()
-                obs["after_sim_swipe"] = sim_obs
-                obs["sim_done"] = sim_done
-                obs["sim_success"] = sim_info["success"]
-                traj.append(obs)
-                traj.append(clipped_action)
+                    real_before_action = ObsFrames(
+                        obs["rgb"]["top"],
+                        obs["rgb"]["front"]
+                    )
+                    real_after_action = ObsFrames(
+                        next_obs["rgb"]["top"],
+                        next_obs["rgb"]["front"]
+                    )
+                    sim_before_action = ObsFrames(
+                        sim_obs["rgb"]["top"],
+                        sim_obs["rgb"]["front"],
+                        sim_obs["segm"]["top"],
+                        sim_obs["segm"]["front"],
+                    )
+                    sim_after_action = ObsFrames(
+                        next_sim_obs["rgb"]["top"],
+                        next_sim_obs["rgb"]["front"],
+                        next_sim_obs["segm"]["top"],
+                        next_sim_obs["segm"]["front"]
+                    )
 
-        print("Press Enter to try again, n to New Episode; or q + Enter to exit.")
-        ret = input()
-        if ret == "s":
-            assert WRITE_TRAJS_TO_DATASET, "Cannot write trajectory."
-            if USE_OBS_FROM_SIM:
-                obs, top_cam_image, front_cam_image = prepare_sim_obs(cubes_detector, r)
-                obs["top_cam_image"] = top_cam_image
-                obs["front_cam_image"] = front_cam_image
-            else:
-                obs = prepare_real_obs(cam_1, cam_2)
-                obs["sim_obs"] = r.env._get_obs()
-            traj.append(obs)
+                step_data = {
+                    "text_prompt": prompt,
+                    "prompt_assets": prompt_assets,
+                    "model_action": clipped_action,
+                    "done": sim_done,
+                    "success": sim_info["success"],
+                    "sim_before_action": sim_before_action.export(),
+                    "sim_after_action": sim_after_action.export(),
+                    "real_before_action": real_before_action.export(),
+                    "real_after_action": real_after_action.export()
+                }
+                
+                traj[f"step_{step_idx}"] = step_data
 
-            file_id = datetime.datetime.now().isoformat()
-            filepath = f"{DATASET_DIR}/{file_id}.traj"
-            with open(filepath, 'wb') as f:
-                pickle.dump(traj, f)
-            print(f"Saved trajectory {file_id}.")
+            obs = next_obs
+            sim_obs = next_sim_obs
+            top_cam_image = next_top_cam_image
+            front_cam_image = next_front_cam_image
 
-            ret = input("Enter command: ")
-        if len(ret) > 0 and ret[0] == 'q':
-            if USE_OBS_FROM_SIM:
-                detector.release()
-            return
-        if len(ret) > 0 and ret[0] == 'n':
-            r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
+            cmd = input("\nPress Return to try again, or n / s / q: ")
+            if cmd == "s":
+                assert WRITE_TRAJS_TO_DATASET, "Cannot write trajectory."
+                file_id = datetime.datetime.now().isoformat()
+                filepath = f"{DATASET_DIR}/{file_id}.traj"
+                with open(filepath, 'wb') as f:
+                    pickle.dump(traj, f)
+                print(f"Saved trajectory {file_id}.")
 
-            if not USE_ORACLE:
+                cmd = input("Enter command: ")
+            if cmd == "n":
+                break  # from episode loop
+            if cmd == "q":
                 if USE_OBS_FROM_SIM:
-                    prompt_assets = r.env.prompt_assets
-                # prompt = r.env.prompt
-                prompt = 'Sweep all {swept_obj} into {bounds} without exceeding {constraint}'
-                model.reset(prompt, prompt_assets)
-            else:
-                prompt = r.env.prompt
-            
-            if WRITE_TRAJS_TO_DATASET:
-                traj = [prompt, prompt_assets]
-            
-        continue
-    
-    if USE_OBS_FROM_SIM:
-        detector.release()
+                    detector.release()
+                return
 
 
 # def run_loop_sim_to_real(r, prompt_assets, robot, oracle, model=None, n_iters=3):
@@ -366,8 +407,6 @@ def get_prompt_assets():
 
 def main():
     r = VIMASceneRenderer('sweep_without_exceeding')
-    r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
-
     robot = RozumArm(use_mock_api=not USE_REAL_ROBOT)
 
     arg = argparse.ArgumentParser()
