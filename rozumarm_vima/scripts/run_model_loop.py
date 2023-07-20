@@ -19,7 +19,7 @@ import argparse
 
 
 USE_OBS_FROM_SIM = True
-USE_ORACLE = True
+USE_ORACLE = False
 
 N_SWEPT_OBJECTS = 1
 USE_REAL_ROBOT = True
@@ -93,7 +93,7 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
         prompt_assets = get_prompt_assets()
 
     if not USE_ORACLE:
-        prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
+        prompt = 'Sweep all {swept_obj} into {bounds} without exceeding {constraint}'
         model.reset(prompt, prompt_assets)
     else:
         prompt = r.env.prompt
@@ -204,7 +204,7 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                 if USE_OBS_FROM_SIM:
                     prompt_assets = r.env.prompt_assets
                 # prompt = r.env.prompt
-                prompt = 'Sweep all /{swept_obj/} into /{bounds/} without exceeding /{constraint/}'
+                prompt = 'Sweep all {swept_obj} into {bounds} without exceeding {constraint}'
                 model.reset(prompt, prompt_assets)
             else:
                 prompt = r.env.prompt
@@ -375,7 +375,7 @@ def main():
     arg.add_argument("--task", type=str, default="visual_manipulation")
     arg.add_argument("--ckpt", type=str, required=True)
     arg.add_argument("--device", default="cpu")
-    arg = arg.parse_args("--ckpt ./20M.ckpt --device cuda --task sweep_without_exceeding".split())    
+    arg = arg.parse_args("--ckpt ./200M.ckpt --device cuda --task sweep_without_exceeding".split())    
     
     if USE_ORACLE:
         oracle = r.env.task.oracle(r.env)

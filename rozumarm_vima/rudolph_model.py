@@ -86,7 +86,7 @@ class RuDolphModel:
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.model = get_rudolph_model('350M', pretrained=True, fp16=True, device=self.device) #2.7B #1.3B #350M
-        checkpoint_path = '/home/daniil/code/rozumarm-vima-utils/VIMA_SWEEP.pt'
+        checkpoint_path = '/home/daniil/code/rozumarm-vima/VIMA_SWEEP.pt'
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
         self.model.load_state_dict(checkpoint)
         self.tokenizer_rudolph = get_tokenizer()
@@ -119,9 +119,11 @@ class RuDolphModel:
     def reset(self, prompt, prompt_assets):
         self.prompt = prompt
         self.prompt_assets = prompt_assets
+        self.elapsed_steps = 0
         return None
     
     def step(self,obs,meta_info):
+        self.elapsed_steps +=1
         left_special_token = '<LT_RLA>'
         right_special_token = '<RT_RLA>'
 
@@ -176,10 +178,10 @@ class RuDolphModel:
         action_bounds_low = np.asarray(action_bounds_low)
         action_bounds_high = np.asarray(action_bounds_high)
         action_bounds_low = torch.tensor(
-            action_bounds_low, dtype=torch.float32, device=cfg.device
+            action_bounds_low, dtype=torch.float32, device=self.api.device
         )
         action_bounds_high = torch.tensor(
-            action_bounds_high, dtype=torch.float32, device=cfg.device
+            action_bounds_high, dtype=torch.float32, device=self.api.device
         )
         actions["pose0_position"] = (
             actions["pose0_position"] * (action_bounds_high - action_bounds_low)
