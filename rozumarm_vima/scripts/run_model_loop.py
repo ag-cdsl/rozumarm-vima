@@ -23,7 +23,7 @@ import argparse
 USE_OBS_FROM_SIM = True
 USE_ORACLE = False
 
-HIDE_ARM = False
+HIDE_ARM = True
 N_SWEPT_OBJECTS = 2
 USE_REAL_ROBOT = True
 # USE_FIXED_PROMPT_FOR_SIM = False
@@ -70,11 +70,11 @@ def prepare_sim_obs(detector, env_renderer):
     ]
 
     env_renderer.render_scene(obj_posquats)
-    obs, *_ = env_renderer.env.step(action=None)
+    obs, _, _, info = env_renderer.env.step(action=None)
 
     _, top_cam_image = detector.cam_1.read_image()
     _, front_cam_image = detector.cam_2.read_image()
-    return obs, top_cam_image, front_cam_image
+    return obs, info, top_cam_image, front_cam_image
 
 
 def prepare_real_obs(top_cam, front_cam):
@@ -122,7 +122,10 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
 
     while True:
         # reset
-        r.reset(exact_num_swept_objects=N_SWEPT_OBJECTS)
+        r.reset(
+            exact_num_swept_objects=N_SWEPT_OBJECTS,
+            force_textures=True
+        )
         
         if USE_ORACLE:
             prompt = r.env.prompt
@@ -138,7 +141,7 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
             model.reset(prompt, prompt_assets)
         
         if USE_OBS_FROM_SIM:
-            obs, top_cam_image, front_cam_image = prepare_sim_obs(cubes_detector, r)
+            obs, _, top_cam_image, front_cam_image = prepare_sim_obs(cubes_detector, r)
         else:
             obs = prepare_real_obs(cam_1, cam_2)
             sim_obs = r.env._get_obs()
@@ -179,7 +182,7 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
             next_sim_obs, sim_reward, sim_done, sim_info = r.env.step(action)
 
             if USE_OBS_FROM_SIM:
-                next_obs, next_top_cam_image, next_front_cam_image = prepare_sim_obs(cubes_detector, r)
+                next_obs, real_info, next_top_cam_image, next_front_cam_image = prepare_sim_obs(cubes_detector, r)
             else:
                 next_obs = prepare_real_obs(cam_1, cam_2)
                 # next_sim_obs is already defined
@@ -237,7 +240,8 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                     "model_action": action,
                     "clipped_action": clipped_action,
                     "done": sim_done,
-                    "success": sim_info["success"],
+                    "success_after_sim_swipe": sim_info["success"],
+                    "success_after_real_swipe": real_info["success"],
                     "sim_before_action": sim_before_action.export(),
                     "sim_after_action": sim_after_action.export(),
                     "real_before_action": real_before_action.export(),
@@ -420,7 +424,7 @@ def main():
     task_kwargs = {
         "possible_dragged_obj_texture": ["red", "blue"],
         "possible_base_obj_texture": ["yellow", "purple"],
-        "constraint_range": [constraint_distance, constraint_distance + 1]
+        "constraint_range": [constraint_distance, constraint_distance + 0.001]
     }
     r = VIMASceneRenderer('sweep_without_exceeding', hide_arm_rgb=HIDE_ARM, task_kwargs=task_kwargs)
     robot = RozumArm(use_mock_api=not USE_REAL_ROBOT)
@@ -439,8 +443,8 @@ def main():
         oracle = None
         from rozumarm_vima.vima_model import VimaModel
         from rozumarm_vima.rudolph_model import RuDolphModel
-        # model = VimaModel(arg)
-        model = RuDolphModel()
+        model = VimaModel(arg)
+        # model = RuDolphModel()
 
     run_loop(r, robot, oracle, model=model, n_iters=1)
 
