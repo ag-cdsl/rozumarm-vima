@@ -128,8 +128,8 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
             prompt = r.env.prompt
             prompt_assets = None
         else:
-            # prompt = r.env.prompt
-            prompt = 'Sweep all {swept_obj} into {bounds} without exceeding {constraint}'
+            prompt = r.env.prompt
+            # prompt = 'Sweep all {swept_obj} into {bounds} without exceeding {constraint}'
 
             if USE_OBS_FROM_SIM:
                 prompt_assets = r.env.prompt_assets
