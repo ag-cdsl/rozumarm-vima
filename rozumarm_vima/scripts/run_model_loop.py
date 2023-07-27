@@ -23,6 +23,7 @@ import argparse
 USE_OBS_FROM_SIM = True
 USE_ORACLE = False
 
+HIDE_ARM = False
 N_SWEPT_OBJECTS = 2
 USE_REAL_ROBOT = True
 # USE_FIXED_PROMPT_FOR_SIM = False
@@ -415,7 +416,13 @@ def get_prompt_assets():
 
 
 def main():
-    r = VIMASceneRenderer('sweep_without_exceeding')
+    constraint_distance = 0.45
+    task_kwargs = {
+        "possible_dragged_obj_texture": ["red", "blue"],
+        "possible_base_obj_texture": ["yellow", "purple"],
+        "constraint_range": [constraint_distance, constraint_distance + 1]
+    }
+    r = VIMASceneRenderer('sweep_without_exceeding', hide_arm_rgb=HIDE_ARM, task_kwargs=task_kwargs)
     robot = RozumArm(use_mock_api=not USE_REAL_ROBOT)
 
     arg = argparse.ArgumentParser()
