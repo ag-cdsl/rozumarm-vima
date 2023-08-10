@@ -21,7 +21,8 @@ import argparse
 
 
 USE_OBS_FROM_SIM = True
-USE_ORACLE = False
+USE_ORACLE = True
+MODE = "auto"
 
 HIDE_ARM = True
 N_SWEPT_OBJECTS = 2
@@ -70,11 +71,11 @@ def prepare_sim_obs(detector, env_renderer):
     ]
 
     env_renderer.render_scene(obj_posquats)
-    obs, _, _, info = env_renderer.env.step(action=None)
+    obs, _, done, info = env_renderer.env.step(action=None)
 
     _, top_cam_image = detector.cam_1.read_image()
     _, front_cam_image = detector.cam_2.read_image()
-    return obs, info, top_cam_image, front_cam_image
+    return obs, done, info, top_cam_image, front_cam_image, obj_posquats
 
 
 def prepare_real_obs(top_cam, front_cam):
@@ -104,9 +105,10 @@ def prepare_real_obs(top_cam, front_cam):
     return obs
 
 
-def run_loop(r, robot, oracle, model=None, n_iters=1):
+def run_loop(r, dummy_renderer, robot, oracle, model=None, n_iters=1):
     """
-    r: scene renderer
+    r: scene renderer, used for rendering in real2sim mode
+    dummy_renderer: used for simulation
     """
     if USE_OBS_FROM_SIM:
         from rozumarm_vima.detectors import detector
@@ -120,12 +122,19 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
     if WRITE_TRAJS_TO_DATASET:
         os.makedirs(DATASET_DIR, exist_ok=True)
 
+    n_episodes_so_far = 0
+    n_successes_so_far = 0
+
     while True:
         # reset
         r.reset(
             exact_num_swept_objects=N_SWEPT_OBJECTS,
             force_textures=True
         )
+        # dummy_renderer.reset(
+        #     exact_num_swept_objects=N_SWEPT_OBJECTS,
+        #     force_textures=True
+        # )
         
         if USE_ORACLE:
             prompt = r.env.prompt
@@ -141,10 +150,9 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
             model.reset(prompt, prompt_assets)
         
         if USE_OBS_FROM_SIM:
-            obs, _, top_cam_image, front_cam_image = prepare_sim_obs(cubes_detector, r)
+            obs, _, _, top_cam_image, front_cam_image, obj_posquats = prepare_sim_obs(cubes_detector, r)
         else:
             obs = prepare_real_obs(cam_1, cam_2)
-            sim_obs = r.env._get_obs()
 
         if WRITE_TRAJS_TO_DATASET:
             traj = {}
@@ -179,10 +187,15 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
 
             # step
             robot.swipe(posquat_0, posquat_1)
-            next_sim_obs, sim_reward, sim_done, sim_info = r.env.step(action)
+
+            # dummy runs in parallel
+            # dummy_renderer.render_scene(obj_posquats)
+            # dummy_renderer.env.step(action=None)
+            # next_sim_obs, sim_reward, sim_done, sim_info = dummy_renderer.env.step(action)
 
             if USE_OBS_FROM_SIM:
-                next_obs, real_info, next_top_cam_image, next_front_cam_image = prepare_sim_obs(cubes_detector, r)
+                next_obs, done, real_info, next_top_cam_image, next_front_cam_image, obj_posquats = prepare_sim_obs(
+                    cubes_detector, r)
             else:
                 next_obs = prepare_real_obs(cam_1, cam_2)
                 # next_sim_obs is already defined
@@ -206,44 +219,70 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                         obs["segm"]["top"],
                         obs["segm"]["front"],
                     )
-                    sim_after_action = ObsFrames(
-                        next_sim_obs["rgb"]["top"],
-                        next_sim_obs["rgb"]["front"],
-                        next_sim_obs["segm"]["top"],
-                        next_sim_obs["segm"]["front"]
+                    sim_after_real_action = ObsFrames(
+                        next_obs["rgb"]["top"],
+                        next_obs["rgb"]["front"],
+                        next_obs["segm"]["top"],
+                        next_obs["segm"]["front"]
                     )
+                    # sim_after_sim_action = ObsFrames(
+                    #     next_sim_obs["rgb"]["top"],
+                    #     next_sim_obs["rgb"]["front"],
+                    #     next_sim_obs["segm"]["top"],
+                    #     next_sim_obs["segm"]["front"]
+                    # )
                 else:
                     real_before_action = ObsFrames(
                         process_img(obs["rgb"]["top"]),
-                        process_img(obs["rgb"]["front"])
+                        process_img(obs["rgb"]["front"]),
+                        obs["segm"]["top"],
+                        obs["segm"]["front"]
                     )
                     real_after_action = ObsFrames(
                         process_img(next_obs["rgb"]["top"]),
-                        process_img(next_obs["rgb"]["front"])
+                        process_img(next_obs["rgb"]["front"]),
+                        next_obs["segm"]["top"],
+                        next_obs["segm"]["front"],
                     )
-                    sim_before_action = ObsFrames(
-                        sim_obs["rgb"]["top"],
-                        sim_obs["rgb"]["front"],
-                        sim_obs["segm"]["top"],
-                        sim_obs["segm"]["front"],
-                    )
-                    sim_after_action = ObsFrames(
-                        next_sim_obs["rgb"]["top"],
-                        next_sim_obs["rgb"]["front"],
-                        next_sim_obs["segm"]["top"],
-                        next_sim_obs["segm"]["front"]
-                    )
+                    # sim_before_action = ObsFrames(
+                    #     sim_obs["rgb"]["top"],
+                    #     sim_obs["rgb"]["front"],
+                    #     sim_obs["segm"]["top"],
+                    #     sim_obs["segm"]["front"],
+                    # )
+                    # sim_after_action = ObsFrames(
+                    #     next_sim_obs["rgb"]["top"],
+                    #     next_sim_obs["rgb"]["front"],
+                    #     next_sim_obs["segm"]["top"],
+                    #     next_sim_obs["segm"]["front"]
+                    # )
+                    
+                    # pipeline with real observations does not use sim
+                    class Thunk:
+                        def export(self):
+                            return None
+                    thunk = Thunk()
+
+                    sim_before_action = thunk
+                    sim_after_real_action = thunk
+                    sim_after_sim_action = thunk
+                    sim_done = None
+                    sim_info = {"success": None}
+                    real_info = {"success": None}
 
                 step_data = {
                     "text_prompt": prompt,
                     "prompt_assets": prompt_assets,
                     "model_action": action,
                     "clipped_action": clipped_action,
-                    "done": sim_done,
-                    "success_after_sim_swipe": sim_info["success"],
+                    "done": done,
+                    # "success_after_sim_swipe": sim_info["success"],
                     "success_after_real_swipe": real_info["success"],
+                    # "failure_after_sim_swipe": sim_info["failure"],
+                    "failure_after_real_swipe": real_info["failure"],
                     "sim_before_action": sim_before_action.export(),
-                    "sim_after_action": sim_after_action.export(),
+                    "sim_after_real_action": sim_after_real_action.export(),
+                    # "sim_after_sim_action": sim_after_sim_action.export(),
                     "real_before_action": real_before_action.export(),
                     "real_after_action": real_after_action.export()
                 }
@@ -251,10 +290,27 @@ def run_loop(r, robot, oracle, model=None, n_iters=1):
                 traj[f"step_{step_idx}"] = step_data
 
             obs = next_obs
-            sim_obs = next_sim_obs
-            top_cam_image = next_top_cam_image
-            front_cam_image = next_front_cam_image
+            
+            if USE_OBS_FROM_SIM:
+                top_cam_image = next_top_cam_image
+                front_cam_image = next_front_cam_image
 
+            if MODE == "auto":
+                time_limit_exceeded = step_idx >= 5
+                real_success = real_info["success"]
+                real_failure = real_info["failure"]
+                if not (real_success or real_failure or time_limit_exceeded):
+                    continue  # continue episode
+                else:
+                    real_success = real_info["success"]
+                    n_episodes_so_far += 1
+                    if real_success:
+                        n_successes_so_far += 1
+                    success_rate = n_successes_so_far / n_episodes_so_far
+                    print(f"Episode ended, success = {real_success}.\n"
+                          f"Total num. episodes: {n_episodes_so_far}."
+                          f" Total num. successes: {n_successes_so_far}. SR = {success_rate}")
+            
             cmd = input("\nPress Return to try again, or n / s / q: ")
             if cmd == "s":
                 assert WRITE_TRAJS_TO_DATASET, "Cannot write trajectory."
@@ -426,7 +482,9 @@ def main():
         "possible_base_obj_texture": ["yellow", "purple"],
         "constraint_range": [constraint_distance, constraint_distance + 0.001]
     }
-    r = VIMASceneRenderer('sweep_without_exceeding', hide_arm_rgb=HIDE_ARM, task_kwargs=task_kwargs)
+    renderer = VIMASceneRenderer('sweep_without_exceeding', hide_arm_rgb=HIDE_ARM, task_kwargs=task_kwargs)
+    # dummy_renderer = VIMASceneRenderer('sweep_without_exceeding', hide_arm_rgb=HIDE_ARM, task_kwargs=task_kwargs, debug=True)
+    dummy_renderer = None
     robot = RozumArm(use_mock_api=not USE_REAL_ROBOT)
 
     arg = argparse.ArgumentParser()
@@ -437,7 +495,7 @@ def main():
     arg = arg.parse_args("--ckpt ./200M.ckpt --device cuda --task sweep_without_exceeding".split())    
     
     if USE_ORACLE:
-        oracle = r.env.task.oracle(r.env)
+        oracle = renderer.env.task.oracle(renderer.env)
         model = None
     else:
         oracle = None
@@ -446,7 +504,7 @@ def main():
         model = VimaModel(arg)
         # model = RuDolphModel()
 
-    run_loop(r, robot, oracle, model=model, n_iters=1)
+    run_loop(renderer, dummy_renderer, robot, oracle, model=model, n_iters=1)
 
 
 """
