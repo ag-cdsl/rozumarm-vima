@@ -198,6 +198,7 @@ def run_loop(r, dummy_renderer, robot, oracle, model=None, n_iters=1):
                     cubes_detector, r)
             else:
                 next_obs = prepare_real_obs(cam_1, cam_2)
+                done = None
                 # next_sim_obs is already defined
             
             def process_img(img):
@@ -268,7 +269,8 @@ def run_loop(r, dummy_renderer, robot, oracle, model=None, n_iters=1):
                     sim_after_sim_action = thunk
                     sim_done = None
                     sim_info = {"success": None}
-                    real_info = {"success": None}
+                    real_info = {"success": None,
+                                 "failure": None}
 
                 step_data = {
                     "text_prompt": prompt,
